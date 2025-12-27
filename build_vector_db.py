@@ -13,7 +13,11 @@ PDF_FOLDER = "pdfs"
 PDF_FILES = [
     "CAF-2-MP.pdf",
     "CAF-2-QB.pdf",
-    "CAF-2-ST.pdf"
+    "CAF-2-ST.pdf",
+    "CAF-2-Autumn-2024.pdf",
+    "CAF-2-TAX-Autumn-2025.pdf",
+    "CAF-2-TAX-Spring-2024.pdf",
+    "CAF-2-TAX-Spring-2025.pdf"
 ]
 
 all_docs = []

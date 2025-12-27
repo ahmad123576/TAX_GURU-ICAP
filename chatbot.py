@@ -1,18 +1,13 @@
-# chatbot.py
-# Updated: Full conversation history + better follow-up support
-
 import streamlit as st
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables import RunnablePassthrough
 from dotenv import load_dotenv
 import os
 
-# Load API key
 load_dotenv()
 google_api_key = os.getenv("GOOGLE_API_KEY")
 
@@ -20,19 +15,27 @@ if not google_api_key:
     st.error("Please add your GOOGLE_API_KEY to .env file!")
     st.stop()
 
-st.title("🧾 Tax Guru – Your ICAP CAF-2 Tax Assistant")
-st.caption("Ask anything from Tax books. I remember our conversation, so feel free to ask follow-ups! 😊")
+# App Title
+st.title("🧾 Tax Guru – Your Complete ICAP CAF-2 Tax Assistant")
+st.caption("Chat with me for explanations or switch to Practice tab to generate mock papers! 😊")
 
-# Load vector DB
+# Load DB
 @st.cache_resource
 def load_db():
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     db = Chroma(persist_directory="vector_db", embedding_function=embeddings)
-    return db.as_retriever(search_kwargs={"k": 6})
+    return db
 
-retriever = load_db()
+db = load_db()
+retriever = db.as_retriever(search_kwargs={"k": 8})
 
-# Load prompt from file
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",  # Your working model
+    google_api_key=google_api_key,
+    temperature=0.4
+)
+
+# Load system prompt
 try:
     with open("prompt_template.txt", "r", encoding="utf-8") as f:
         system_template = f.read()
@@ -40,104 +43,136 @@ except FileNotFoundError:
     st.error("prompt_template.txt not found!")
     st.stop()
 
-# Initialize chat history FIRST (before chain definition)
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-    # Optional welcome message
-    welcome = """Welcome to Tax Guru! 👋I am your ICAP CAF-2 Tax Practices assistant, built exclusively using your official study material, question bank, and model papers (latest Tax Year 2026 rules).
-            ✅ I answer ALL questions strictly from these PDFs – no external knowledge or guesses.
-            ✅ For current exam preparation: My answers match the latest rules, rates, and suggested solutions.
-            ✅ For old past papers: I use the core concepts and workings from the latest material. Note that tax rates, slabs, and some treatments may have changed over the years due to Finance Acts. Past paper solutions used the rates applicable in that specific tax year.
-            Focus on understanding the concepts and workings – they remain highly relevant! 😊
-            Let’s start – ask me anything!"""
-                                            
-    # st.session_state.messages.append({"role": "assistant", "content": welcome})
-    st.session_state.messages.append({"role": "assistant", "content": welcome})
+# Tabs
+tab1, tab2 = st.tabs(["💬 Chat with Tax Guru", "📝 Practice Paper Generator"])
 
-# Function to format chat history for the LLM
-def format_chat_history(messages):
-    """Convert Streamlit messages to LangChain message format"""
-    history = []
-    # Get last 10 messages (excluding welcome message if it's the only one)
-    recent_messages = messages[-10:] if len(messages) > 1 else []
-    
-    for msg in recent_messages:
-        if msg["role"] == "user":
-            history.append(HumanMessage(content=msg["content"]))
-        elif msg["role"] == "assistant":
-            history.append(AIMessage(content=msg["content"]))
-    return history
+# ====================== TAB 1: CHAT ======================
+with tab1:
+    # Chat prompt
+    chat_prompt = ChatPromptTemplate.from_messages([
+        ("system", system_template),
+        MessagesPlaceholder(variable_name="chat_history"),
+        ("human", "{question}"),
+    ])
 
-# Updated prompt with history support
-# Include context in the system message
-full_template = system_template + "\n\nUse the following context from the documents to answer the question:\n{context}"
-prompt = ChatPromptTemplate.from_messages([
-    ("system", full_template),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{question}")
-])
+    chat_chain = (
+        {
+            "context": retriever,
+            "question": RunnablePassthrough(),
+            "chat_history": lambda x: st.session_state.get("chat_history", [])
+        }
+        | chat_prompt
+        | llm
+        | StrOutputParser()
+    )
 
-# Gemini LLM
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",  # Using gemini-pro for stability (change if needed)
-    google_api_key=google_api_key,
-    temperature=0.4
-)
+    # Initialize chat history
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+        welcome = """
+Assalam o Alaikum! 👋  
+I'm Tax Guru, your friendly ICAP CAF-2 Tax Practices tutor.  
+I'm built using your official study material (TY 2026 rules). Ask me anything — theory, numericals, MCQs, or past papers! 😊
+"""
+        st.session_state.chat_history.append({"role": "assistant", "content": welcome})
 
-# Chain with history and context
-def create_chain_input(user_question):
-    """Create input for the chain with proper context and history"""
-    # Get context from retriever
-    context_docs = retriever.invoke(user_question)
-    context = "\n\n".join([doc.page_content for doc in context_docs])
-    
-    # Format chat history (safely access session state)
-    messages = st.session_state.get("messages", [])
-    chat_history = format_chat_history(messages)
-    
-    return {
-        "context": context,
-        "question": user_question,
-        "chat_history": chat_history
-    }
+    # Display all chat messages from history
+    for message in st.session_state.chat_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-chain = (
-    RunnablePassthrough()
-    | RunnableLambda(create_chain_input)
-    | prompt
-    | llm
-    | StrOutputParser()
-)
+    # Chat input - rendered last so it stays at the bottom
+    user_input = st.chat_input(
+        "Ask a Tax question or say hello... 😊",
+        key="chat_input"
+    )
 
-# Display chat history
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-# User input
-if user_input := st.chat_input("Ask a question or say hello..."):
-    # Add user message
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
-        st.markdown(user_input)
-
-    # Generate response
-    with st.chat_message("assistant"):
+    # Process new input
+    if user_input:
+        # Add user message to history
+        st.session_state.chat_history.append({"role": "user", "content": user_input})
+        
+        # Generate response
         with st.spinner("Thinking..."):
-            try:
-                response = chain.invoke(user_input)
-            except Exception as e:
-                error_msg = str(e)
-                if "messages" in error_msg and "attribute" in error_msg.lower():
-                    # If messages not initialized, reinitialize and retry
-                    if "messages" not in st.session_state:
-                        st.session_state.messages = []
-                    response = f"❌ Error: {error_msg}\n\nPlease refresh the page and try again."
-                elif "404" in error_msg or "NOT_FOUND" in error_msg:
-                    response = "❌ Error: The Gemini model is not found. Please check the model name in the code (try 'gemini-pro' or 'gemini-1.5-pro-latest')."
-                else:
-                    response = f"❌ An error occurred: {error_msg}"
-        st.markdown(response)
+            response = chat_chain.invoke(user_input)
+        
+        # Add assistant response to history
+        st.session_state.chat_history.append({"role": "assistant", "content": response})
+        
+        # Rerun to show all messages with input at bottom
+        st.rerun()
+# ====================== TAB 2: PRACTICE PAPER ======================
+with tab2:
+    st.markdown("Generate **ICAP-style MCQs and numericals** with proper exam formatting. Attempt first, then reveal answers!")
 
-    # Add assistant response to history
-    st.session_state.messages.append({"role": "assistant", "content": response})
+    # Question generation prompt
+    question_prompt = PromptTemplate.from_template("""
+You are an expert ICAP CAF-2 Tax Practices examiner. Generate high-quality, exam-style questions.
+
+User request: {user_request}
+
+Instructions:
+- Generate ONLY the requested number and type.
+- MCQs: Number the question, full statement, then options on separate lines:
+  a) 
+  b) 
+  c) 
+  d) 
+- Numericals: Full scenario + "Required:" clearly.
+- Use latest TY 2026 rules from context.
+- Do NOT provide answers.
+
+Context:
+{context}
+
+Questions:
+""")
+
+    question_chain = (
+        {"context": retriever, "user_request": RunnablePassthrough()}
+        | question_prompt
+        | llm
+        | StrOutputParser()
+    )
+
+    # Answer prompt
+    answer_prompt = PromptTemplate.from_template("""
+Provide full ICAP-style suggested answers with step-by-step workings, section references, and final answers.
+
+Questions:
+{questions}
+
+Suggested Answers:
+""")
+
+    answer_chain = answer_prompt | llm | StrOutputParser()
+
+    request = st.text_input(
+        "What do you want to practice?",
+        placeholder="e.g., Generate 10 MCQs on Income from Salary, 3 numericals on Sales Tax"
+    )
+
+    if st.button("Generate Questions", key="gen_practice"):
+        if request:
+            with st.spinner("Generating questions..."):
+                questions = question_chain.invoke(request)
+            st.session_state.practice_questions = questions
+
+            st.markdown("### 📄 Your Practice Paper")
+            st.markdown(f"**Topic:** {request}")
+            st.markdown("---")
+            st.markdown(questions)
+            st.success("Attempt them first! Then click below for answers. Good luck! 🚀")
+        else:
+            st.warning("Please enter your request!")
+
+    if "practice_questions" in st.session_state:
+        if st.button("Show Suggested Answers", key="show_ans"):
+            with st.spinner("Generating full workings..."):
+                answers = answer_chain.invoke({"questions": st.session_state.practice_questions})
+            st.markdown("### ✅ Suggested Answers")
+            st.markdown(answers)
+
+# Done!
+st.sidebar.success("Tax Guru is ready! Switch between Chat and Practice tabs.")
+st.sidebar.caption("Built with ❤️ for ICAP students")
