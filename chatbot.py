@@ -1,3 +1,6 @@
+# chatbot.py
+# Final Merged: Chat + Practice Paper Generator
+
 import streamlit as st
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -66,7 +69,7 @@ with tab1:
         | StrOutputParser()
     )
 
-    # Initialize chat history
+    # Initialize chat history and welcome message
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
         welcome = """
@@ -76,31 +79,34 @@ I'm built using your official study material (TY 2026 rules). Ask me anything �
 """
         st.session_state.chat_history.append({"role": "assistant", "content": welcome})
 
-    # Display all chat messages from history
+    # Display all previous messages
     for message in st.session_state.chat_history:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Chat input - rendered last so it stays at the bottom
+    # --- Chat input ALWAYS at the very bottom ---
     user_input = st.chat_input(
         "Ask a Tax question or say hello... 😊",
-        key="chat_input"
+        key="persistent_chat_input"
     )
 
-    # Process new input
     if user_input:
-        # Add user message to history
+        # Add user message
         st.session_state.chat_history.append({"role": "user", "content": user_input})
-        
-        # Generate response
-        with st.spinner("Thinking..."):
-            response = chat_chain.invoke(user_input)
-        
+        with st.chat_message("user"):
+            st.markdown(user_input)
+
+        # Generate and display assistant response
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                response = chat_chain.invoke(user_input)
+            st.markdown(response)
+
         # Add assistant response to history
         st.session_state.chat_history.append({"role": "assistant", "content": response})
-        
-        # Rerun to show all messages with input at bottom
-        st.rerun()
+
+        # Rerun to scroll to bottom and keep input visible
+        st.rerun()        
 # ====================== TAB 2: PRACTICE PAPER ======================
 with tab2:
     st.markdown("Generate **ICAP-style MCQs and numericals** with proper exam formatting. Attempt first, then reveal answers!")
@@ -173,6 +179,6 @@ Suggested Answers:
             st.markdown("### ✅ Suggested Answers")
             st.markdown(answers)
 
-# Done!
-st.sidebar.success("Tax Guru is ready! Switch between Chat and Practice tabs.")
-st.sidebar.caption("Built with ❤️ for ICAP students")
+# # Done!
+# st.sidebar.success("Tax Guru is ready! Switch between Chat and Practice tabs.")
+# st.sidebar.caption("Built with ❤️ for ICAP students")
