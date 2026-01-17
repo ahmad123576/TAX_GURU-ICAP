@@ -178,7 +178,3 @@ Suggested Answers:
                 answers = answer_chain.invoke({"questions": st.session_state.practice_questions})
             st.markdown("### ✅ Suggested Answers")
             st.markdown(answers)
-
-# # Done!
-# st.sidebar.success("Tax Guru is ready! Switch between Chat and Practice tabs.")
-# st.sidebar.caption("Built with ❤️ for ICAP students")
